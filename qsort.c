@@ -161,13 +161,28 @@ int main(int argc, char** argv) {
         // end debug output
     }
     
-    
     // base case: sort locally
     qsort(local, loadCount, sizeof(int), comp);
     
+
     // stich results together in root
-    MPI_Gather(local, loadCount, MPI_INT,
-               data, loadCount * world_size, MPI_INT, 0, MPI_COMM_WORLD);
+    int* recvcounts;
+    if(world_rank == 0) {
+        recvcounts = malloc(sizeof(int) * world_size);
+    }
+    MPI_Gather(&loadCount, 1, MPI_INT,
+               recvcounts, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    int* displs;
+    if(world_rank == 0) {
+        displs = malloc(sizeof(int) * world_size);
+        displs[0] = 0;
+        for(int i = 1; i < world_size; ++i) {
+            displs[i] = displs[i - 1] + recvcounts[i - 1];
+        }
+    }
+    
+    MPI_Gatherv(local, loadCount, MPI_INT,
+               data, recvcounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
     
 
     // end of algorithm /////////////////////////
@@ -175,7 +190,7 @@ int main(int argc, char** argv) {
 
     // print results
     if(world_rank == 0) {
-        for(size_t i = 0; i < loadCount * world_size; ++i) {
+        for(size_t i = 0; i < inputSize; ++i) {
             printf(" %d", data[i]);
         }
         
@@ -183,7 +198,7 @@ int main(int argc, char** argv) {
         
         qsort(input, inputSize, sizeof(int), comp);
         int correct = 1;
-        for(size_t i = 0; i < loadCount * world_size; ++i) {
+        for(size_t i = 0; i < inputSize; ++i) {
             correct = correct && input[i] == data[i];
         }
         printf("correct: %d\n", correct);
