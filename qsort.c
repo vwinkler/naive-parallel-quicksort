@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 int comp(const void* ap, const void* bp) {
     int a = *((int*)ap);
@@ -25,6 +26,9 @@ int main(int argc, char** argv) {
     
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    
+    // init rng
+    srand(time(NULL) + world_rank);
    
     // create input
     int* input;
@@ -66,19 +70,50 @@ int main(int argc, char** argv) {
         
 
         // agree upon pivot
+        int numElementsToTheLeft = 0;
+        if(currentMaster < world_rank) {
+            MPI_Status status;
+            MPI_Recv(&numElementsToTheLeft, 1, MPI_INT, world_rank - 1, 0, MPI_COMM_WORLD,
+                     &status);
+        }
+        numElementsToTheLeft += loadCount;
+        if(world_rank + 1 < currentMaster + numPartners) {
+            MPI_Send(&numElementsToTheLeft, 1, MPI_INT, world_rank + 1, 0, MPI_COMM_WORLD);
+        }
+        
+        int pivotIndex;
+        if(world_rank == currentMaster + numPartners - 1) {
+            if(numElementsToTheLeft > 0) {
+                pivotIndex = rand() % numElementsToTheLeft;
+            } else {
+                pivotIndex = -1;
+            }
+            for(int i = currentMaster; i < currentMaster + numPartners - 1; ++i) {
+                MPI_Send(&pivotIndex, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+            }
+        } else {
+            MPI_Status status;
+            MPI_Recv(&pivotIndex, 1, MPI_INT, currentMaster + numPartners - 1, 0, MPI_COMM_WORLD,
+                     &status);
+        }
+
         int pivot;
-        if(world_rank == currentMaster) {
+        if(pivotIndex < 0) {
             pivot = 0;
+        } else if(numElementsToTheLeft - loadCount <= pivotIndex
+                  && pivotIndex < numElementsToTheLeft) {
+            pivot = local[pivotIndex - (numElementsToTheLeft - loadCount)];
             
-            for(int i = currentMaster + 1; i < currentMaster + numPartners; ++i) {
-                MPI_Send(&pivot, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+            for(int i = currentMaster; i < currentMaster + numPartners; ++i) {
+                if(i != world_rank) {
+                    MPI_Send(&pivot, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                }
             }
         } else {
              MPI_Status status;
-             MPI_Recv(&pivot, 1, MPI_INT, currentMaster, MPI_ANY_TAG,
+             MPI_Recv(&pivot, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG,
                       MPI_COMM_WORLD, &status);
         }
-        MPI_Bcast(&pivot, 1, MPI_INT, 0, MPI_COMM_WORLD);
         
         // separate into low and high
         int endLow = 0;
