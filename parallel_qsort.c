@@ -10,7 +10,6 @@ void parallelQsort(int* data, int inputSize, int (*comp)(const void *, const voi
     int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     assert(world_size > 0 && (world_size & (world_size - 1)) == 0);
-    assert(inputSize % (2*world_size) == 0);
     
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);

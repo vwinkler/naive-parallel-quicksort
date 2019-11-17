@@ -1,2 +1,2 @@
 #!/bin/bash
-mpirun qsort
+mpirun qsort $1

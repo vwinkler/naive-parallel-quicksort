@@ -6,8 +6,6 @@
 #include <time.h>
 #include "parallel_qsort.h"
 
-#define DEBUG
-
 int comp(const void* ap, const void* bp) {
     int a = *((int*)ap);
     int b = *((int*)bp);
@@ -25,10 +23,27 @@ int main(int argc, char** argv) {
     
     int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    assert(world_size > 0 && (world_size & (world_size - 1)) == 0);
     
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    
+    if(argc != 2) {
+        if(world_rank == 0) {
+            fprintf(stderr, "illegal number of arguments: %d; expected 1\n", argc);
+        }
+        MPI_Finalize();
+        return 0;
+    }
+        
+    if(world_size <= 0 || (world_size & (world_size - 1)) != 0) {
+        if(world_rank == 0) {
+            fprintf(stderr, "illegal number of threads: %d; needs to be power of two\n",
+                    world_size);
+            fprintf(stderr, "aborting\n");
+        }
+        MPI_Finalize();
+        return 0;
+    }
     
     // init rng
     if(world_rank == 0) {
@@ -37,7 +52,7 @@ int main(int argc, char** argv) {
    
     // create input
     int* input;
-    int inputSize = 16;
+    int inputSize = atoi(argv[1]);
     if(world_rank == 0) {
         input = malloc(sizeof(int) * inputSize);
         for(size_t i = 0; i < inputSize; ++i) {
