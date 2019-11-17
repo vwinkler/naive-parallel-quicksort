@@ -4,59 +4,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "parallel_qsort.h"
 
-int comp(const void* ap, const void* bp) {
-    int a = *((int*)ap);
-    int b = *((int*)bp);
-    
-    if(a < b)
-        return -1;
-    else if(a > b)
-        return 1;
-    else
-        return 0;
-}
-
-int main(int argc, char** argv) { 
-    MPI_Init(NULL, NULL);
-    
+void parallelQsort(int* data, int inputSize, int (*comp)(const void *, const void *)) {
     int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     assert(world_size > 0 && (world_size & (world_size - 1)) == 0);
+    assert(inputSize % (2*world_size) == 0);
     
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     
-    // init rng
-    srand(time(NULL) + world_rank);
-   
-    // create input
-    int* input;
-    int inputSize = 16;
-    if(world_rank == 0) {
-        input = malloc(sizeof(int) * inputSize);
-        for(size_t i = 0; i < inputSize; ++i) {
-            input[i] = i;
-        }
-    }
-    
-    int* data;
     int loadCount;
     if(world_rank == 0) {
-        assert(inputSize % (2*world_size) == 0);
         loadCount = inputSize / world_size;
-        data = malloc(sizeof(int) * inputSize);
-        for(size_t i = 0; i < inputSize; ++i) {
-            data[i] = input[i];
-        }
     }
-    
-
-    // start of algorithm ///////////////////////
-   
-
     MPI_Bcast(&loadCount, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    assert(loadCount % 2 == 0);
 
     int* local = malloc(sizeof(int) * loadCount);
     MPI_Scatter(data, loadCount, MPI_INT,
@@ -174,8 +137,7 @@ int main(int argc, char** argv) {
                       MPI_COMM_WORLD, &status);
         }
         
-        // begin debug output
-
+#ifdef DEBUG
         if(world_rank == 0) {
             printf("depth = %d:\n", currentDepth);
         }
@@ -192,8 +154,7 @@ int main(int argc, char** argv) {
             }
             MPI_Barrier(MPI_COMM_WORLD);
         }
-        
-        // end debug output
+#endif // DEBUG
     }
     
     // base case: sort locally
@@ -218,28 +179,5 @@ int main(int argc, char** argv) {
     
     MPI_Gatherv(local, loadCount, MPI_INT,
                data, recvcounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
-    
-
-    // end of algorithm /////////////////////////
-
-
-    // print results
-    if(world_rank == 0) {
-        for(size_t i = 0; i < inputSize; ++i) {
-            printf(" %d", data[i]);
-        }
-        
-        printf("\n");
-        
-        qsort(input, inputSize, sizeof(int), comp);
-        int correct = 1;
-        for(size_t i = 0; i < inputSize; ++i) {
-            correct = correct && input[i] == data[i];
-        }
-        printf("correct: %d\n", correct);
-    }
-
     free(local);
-    
-    MPI_Finalize();
 }

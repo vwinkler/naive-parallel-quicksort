@@ -1,2 +1,2 @@
-qsort : qsort.c
+qsort : parallel_qsort.c main.c
 	mpicc -o $@ $^
