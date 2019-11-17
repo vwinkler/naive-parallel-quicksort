@@ -31,7 +31,9 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     
     // init rng
-    srand(time(NULL) + world_rank);
+    if(world_rank == 0) {
+        srand(time(NULL) + world_rank);
+    }
    
     // create input
     int* input;
@@ -39,7 +41,7 @@ int main(int argc, char** argv) {
     if(world_rank == 0) {
         input = malloc(sizeof(int) * inputSize);
         for(size_t i = 0; i < inputSize; ++i) {
-            input[i] = i;
+            input[i] = rand();
         }
     }
     
