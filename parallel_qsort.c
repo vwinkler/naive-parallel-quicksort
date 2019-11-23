@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 #include "parallel_qsort.h"
 
 typedef struct
@@ -26,7 +27,7 @@ void parallelDistributedQsort(SortingElement* local, MPI_Comm communicator,
         int currentPartner = currentMaster +
             (((rank - currentMaster) + numPartners/2) % numPartners);
 
-        // agree upon pivot
+        // agree upon pivot index
         int numElementsToTheLeft = 0;
         MPI_Scan(&local->size, &numElementsToTheLeft, 1, MPI_INT, MPI_SUM, communicator);
         
@@ -37,32 +38,16 @@ void parallelDistributedQsort(SortingElement* local, MPI_Comm communicator,
             } else {
                 pivotIndex = -1;
             }
-            for(int i = currentMaster; i < currentMaster + numPartners - 1; ++i) {
-                MPI_Send(&pivotIndex, 1, MPI_INT, i, 0, communicator);
-            }
-        } else {
-            MPI_Status status;
-            MPI_Recv(&pivotIndex, 1, MPI_INT, currentMaster + numPartners - 1, 0, communicator,
-                     &status);
-        }
+        } 
+        MPI_Bcast(&pivotIndex, 1, MPI_INT, 0, communicator);
 
-        int pivot;
-        if(pivotIndex < 0) {
-            pivot = 0;
-        } else if(numElementsToTheLeft - local->size <= pivotIndex
+        // distribute the pivot (value)
+        int pivot = INT_MIN;
+        if(numElementsToTheLeft - local->size <= pivotIndex
                   && pivotIndex < numElementsToTheLeft) {
             pivot = local->data[pivotIndex - (numElementsToTheLeft - local->size)];
-            
-            for(int i = currentMaster; i < currentMaster + numPartners; ++i) {
-                if(i != rank) {
-                    MPI_Send(&pivot, 1, MPI_INT, i, 0, communicator);
-                }
-            }
-        } else {
-             MPI_Status status;
-             MPI_Recv(&pivot, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG,
-                      communicator, &status);
         }
+        MPI_Allreduce(MPI_IN_PLACE, &pivot, 1, MPI_INT, MPI_MAX, communicator);
         
         // separate into low and high
         int endLow = 0;
