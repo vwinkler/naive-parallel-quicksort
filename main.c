@@ -56,9 +56,23 @@ int main(int argc, char** argv) {
     if(world_rank == 0) {
         input = malloc(sizeof(int) * inputSize);
         for(size_t i = 0; i < inputSize; ++i) {
+#ifndef DEBUG
             input[i] = rand();
+#else
+            input[i] = rand() % inputSize;
+#endif
         }
     }
+    
+#ifdef DEBUG
+    // print results
+    if(world_rank == 0) {
+        for(size_t i = 0; i < inputSize; ++i) {
+            printf(" %d", input[i]);
+        }
+        printf("\n");
+    }
+#endif // DEBUG
     
 #ifdef DEBUG
     int* inputCopy;
