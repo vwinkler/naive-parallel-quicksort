@@ -6,7 +6,13 @@
 #include <time.h>
 #include "parallel_qsort.h"
 
-int* parallelDistributedQsort(MPI_Comm communicator, int* local, int loadCount, int* newLoadCount,
+typedef struct
+{
+    int* data;
+    int size;
+} SortingElement;
+
+void parallelDistributedQsort(SortingElement* local, MPI_Comm communicator,
                               int (*comp)(const void *, const void *)) {
     int numPartners;
     MPI_Comm_size(communicator, &numPartners);
@@ -27,7 +33,7 @@ int* parallelDistributedQsort(MPI_Comm communicator, int* local, int loadCount, 
             MPI_Recv(&numElementsToTheLeft, 1, MPI_INT, rank - 1, 0, communicator,
                      &status);
         }
-        numElementsToTheLeft += loadCount;
+        numElementsToTheLeft += local->size;
         if(rank + 1 < currentMaster + numPartners) {
             MPI_Send(&numElementsToTheLeft, 1, MPI_INT, rank + 1, 0, communicator);
         }
@@ -51,9 +57,9 @@ int* parallelDistributedQsort(MPI_Comm communicator, int* local, int loadCount, 
         int pivot;
         if(pivotIndex < 0) {
             pivot = 0;
-        } else if(numElementsToTheLeft - loadCount <= pivotIndex
+        } else if(numElementsToTheLeft - local->size <= pivotIndex
                   && pivotIndex < numElementsToTheLeft) {
-            pivot = local[pivotIndex - (numElementsToTheLeft - loadCount)];
+            pivot = local->data[pivotIndex - (numElementsToTheLeft - local->size)];
             
             for(int i = currentMaster; i < currentMaster + numPartners; ++i) {
                 if(i != rank) {
@@ -68,30 +74,31 @@ int* parallelDistributedQsort(MPI_Comm communicator, int* local, int loadCount, 
         
         // separate into low and high
         int endLow = 0;
-        for(int i = 0; i < loadCount; ++i) {
-            if(local[i] < pivot) {
-                int tmp = local[i];
-                local[i] = local[endLow];
-                local[endLow] = tmp;
+        for(int i = 0; i < local->size; ++i) {
+            if(local->data[i] < pivot) {
+                int tmp = local->data[i];
+                local->data[i] = local->data[endLow];
+                local->data[endLow] = tmp;
                 ++endLow;
             }
         }
         
         if(currentPartner < rank) {
             // receive upper
-             int oldLoadCount = loadCount;
-             int* oldLocal = local;
+             int oldLoadCount = local->size;
+             int* oldLocal = local->data;
 
              MPI_Status status;
              int numReceive;
              MPI_Recv(&numReceive, 1, MPI_INT, currentPartner, MPI_ANY_TAG,
                       communicator, &status);
              
-             loadCount = oldLoadCount - endLow + numReceive;
-             local = malloc(sizeof(int) * loadCount);
-             MPI_Recv(local, numReceive, MPI_INT, currentPartner, MPI_ANY_TAG,
+             local->size = oldLoadCount - endLow + numReceive;
+             local->data = malloc(sizeof(int) * local->size);
+             MPI_Recv(local->data, numReceive, MPI_INT, currentPartner, MPI_ANY_TAG,
                       communicator, &status);
-             memcpy(local + numReceive, oldLocal + endLow, (oldLoadCount - endLow)*sizeof(int));
+             memcpy(local->data + numReceive, oldLocal + endLow,
+                    (oldLoadCount - endLow)*sizeof(int));
             
              // send from 0 to (excluding) endLow
              MPI_Send(&endLow, 1, MPI_INT, currentPartner, 0,
@@ -100,28 +107,28 @@ int* parallelDistributedQsort(MPI_Comm communicator, int* local, int loadCount, 
                       communicator);
              free(oldLocal);
         } else {
-            // send from endLow to (excluding) loadCount
+            // send from endLow to (excluding) local->size
              MPI_Status status;
-             int numUpper = loadCount - endLow;
+             int numUpper = local->size - endLow;
              MPI_Send(&numUpper, 1, MPI_INT, currentPartner, 0,
                       communicator);
-             MPI_Send(local + endLow, numUpper, MPI_INT, currentPartner, 0,
+             MPI_Send(local->data + endLow, numUpper, MPI_INT, currentPartner, 0,
                       communicator);
 
              // receive lower
-             int oldLoadCount = loadCount;
-             int* oldLocal = local;
+             int oldLoadCount = local->size;
+             int* oldLocal = local->data;
 
              int numReceive;
              MPI_Recv(&numReceive, 1, MPI_INT, currentPartner, MPI_ANY_TAG,
                       communicator, &status);
              
-             loadCount = endLow + numReceive;
-             local = malloc(sizeof(int) * loadCount);
+             local->size = endLow + numReceive;
+             local->data = malloc(sizeof(int) * local->size);
 
-             memcpy(local, oldLocal, endLow * sizeof(int));
+             memcpy(local->data, oldLocal, endLow * sizeof(int));
              free(oldLocal);
-             MPI_Recv(local + endLow, numReceive, MPI_INT, currentPartner, MPI_ANY_TAG,
+             MPI_Recv(local->data + endLow, numReceive, MPI_INT, currentPartner, MPI_ANY_TAG,
                       communicator, &status);
         }
         
@@ -133,8 +140,8 @@ int* parallelDistributedQsort(MPI_Comm communicator, int* local, int loadCount, 
                 printf("%d: rank=%d/%d partner=%d/%d pivot=%d endLow=%d\n",
                        world_rank, rank, numPartners, currentPartner, numPartners, pivot, endLow);
                 printf("\t");
-                for(int j = 0; j < loadCount; ++j) {
-                    printf("%d ", local[j]);
+                for(int j = 0; j < local->size; ++j) {
+                    printf("%d ", local->data[j]);
                 }
                 printf("\n");
             }
@@ -144,17 +151,15 @@ int* parallelDistributedQsort(MPI_Comm communicator, int* local, int loadCount, 
 
         MPI_Comm newCommunicator;
         MPI_Comm_split(communicator, (2*rank)/numPartners, 0, &newCommunicator);
-        local = parallelDistributedQsort(newCommunicator, local, loadCount, &loadCount, comp);
+        parallelDistributedQsort(local, newCommunicator, comp);
         MPI_Comm_free(&newCommunicator);
     } else {
         // base case: sort locally
-        qsort(local, loadCount, sizeof(int), comp);
+        qsort(local->data, local->size, sizeof(int), comp);
     }
-    *newLoadCount = loadCount;
-    return local;
 }
 
-void parallelQsort(int* data, int inputSize, int (*comp)(const void *, const void *)) {
+void parallelQsort(int* input, int inputSize, int (*comp)(const void *, const void *)) {
     int world_size;
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     assert(world_size > 0 && (world_size & (world_size - 1)) == 0);
@@ -163,17 +168,18 @@ void parallelQsort(int* data, int inputSize, int (*comp)(const void *, const voi
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     assert(inputSize % world_size == 0);
     
-    int loadCount;
+    SortingElement local;
+    
     if(world_rank == 0) {
-        loadCount = inputSize / world_size;
+        local.size = inputSize / world_size;
     }
-    MPI_Bcast(&loadCount, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&local.size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    int* local = malloc(sizeof(int) * loadCount);
-    MPI_Scatter(data, loadCount, MPI_INT,
-                local, loadCount, MPI_INT, 0, MPI_COMM_WORLD);
+    local.data = malloc(sizeof(int) * local.size);
+    MPI_Scatter(input, local.size, MPI_INT,
+                local.data, local.size, MPI_INT, 0, MPI_COMM_WORLD);
 
-    local = parallelDistributedQsort(MPI_COMM_WORLD, local, loadCount, &loadCount, comp);
+    parallelDistributedQsort(&local, MPI_COMM_WORLD, comp);
     
 
     // stich results together in root
@@ -181,7 +187,7 @@ void parallelQsort(int* data, int inputSize, int (*comp)(const void *, const voi
     if(world_rank == 0) {
         recvcounts = malloc(sizeof(int) * world_size);
     }
-    MPI_Gather(&loadCount, 1, MPI_INT,
+    MPI_Gather(&local.size, 1, MPI_INT,
                recvcounts, 1, MPI_INT, 0, MPI_COMM_WORLD);
     int* displs;
     if(world_rank == 0) {
@@ -192,7 +198,7 @@ void parallelQsort(int* data, int inputSize, int (*comp)(const void *, const voi
         }
     }
     
-    MPI_Gatherv(local, loadCount, MPI_INT,
-               data, recvcounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
-    free(local);
+    MPI_Gatherv(local.data, local.size, MPI_INT,
+               input, recvcounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
+    free(local.data);
 }
