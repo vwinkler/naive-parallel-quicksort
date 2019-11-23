@@ -28,15 +28,7 @@ void parallelDistributedQsort(SortingElement* local, MPI_Comm communicator,
 
         // agree upon pivot
         int numElementsToTheLeft = 0;
-        if(currentMaster < rank) {
-            MPI_Status status;
-            MPI_Recv(&numElementsToTheLeft, 1, MPI_INT, rank - 1, 0, communicator,
-                     &status);
-        }
-        numElementsToTheLeft += local->size;
-        if(rank + 1 < currentMaster + numPartners) {
-            MPI_Send(&numElementsToTheLeft, 1, MPI_INT, rank + 1, 0, communicator);
-        }
+        MPI_Scan(&local->size, &numElementsToTheLeft, 1, MPI_INT, MPI_SUM, communicator);
         
         int pivotIndex;
         if(rank == currentMaster + numPartners - 1) {
